@@ -3,32 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Spatial Logger (Night Mode)</title>
+    <title>AI Spatial Assistant v2</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
         body { margin: 0; font-family: 'Segoe UI', sans-serif; background: #000; color: #fff; overflow: hidden; }
-        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; z-index: 10; padding: 15px; display: flex; flex-wrap: wrap; gap: 8px; background: rgba(0,0,0,0.4); }
-        video { width: 100vw; height: 100vh; object-fit: cover; transition: filter 0.3s; }
+        #ui-layer { position: absolute; top: 0; left: 0; width: 100%; z-index: 10; padding: 15px; display: flex; flex-wrap: wrap; gap: 8px; background: rgba(0,0,0,0.5); }
+        video { width: 100vw; height: 100vh; object-fit: cover; }
         canvas { position: absolute; top: 0; left: 0; pointer-events: none; }
-        button { padding: 10px 15px; border-radius: 6px; border: none; background: #3498db; color: white; font-weight: bold; cursor: pointer; }
-        .night-mode video { filter: brightness(1.5) contrast(1.2) saturate(1.2); }
-        #log-container { position: absolute; bottom: 0; width: 100%; height: 120px; background: rgba(0,0,0,0.8); font-size: 11px; overflow-y: auto; padding: 10px; border-top: 1px solid #444; }
-        .fast-move-indicator { color: #e74c3c; font-weight: bold; display: none; }
+        button { padding: 12px; border-radius: 8px; border: none; background: #3498db; color: white; font-weight: bold; }
+        .night-mode video { filter: brightness(1.6) contrast(1.1); }
+        #log-container { position: absolute; bottom: 0; width: 100%; height: 130px; background: rgba(0,0,0,0.85); font-size: 11px; overflow-y: auto; padding: 10px; border-top: 2px solid #2ecc71; }
+        .status-pill { background: #e74c3c; padding: 2px 8px; border-radius: 10px; font-size: 10px; display: none; }
     </style>
 </head>
 <body>
 
     <div id="ui-layer">
         <button id="startBtn" style="background: #2ecc71;">Start AI</button>
-        <button id="nightBtn">Toggle Night Mode</button>
-        <button id="downloadBtn" style="background: #9b59b6;">Save Logs</button>
-        <span id="fastLabel" class="fast-move-indicator">FAST MOVEMENT: 2s CAPTURE</span>
+        <button id="nightBtn">Night Mode</button>
+        <button id="downloadBtn" style="background: #9b59b6;">Logs</button>
+        <span id="fastLabel" class="status-pill">MOTION DETECTED</span>
     </div>
     
     <video id="webcam" autoplay playsinline muted></video>
     <canvas id="overlay"></canvas>
-    <div id="log-container">--- Logs Initialized ---</div>
+    <div id="log-container">--- System Ready ---</div>
 
 <script>
     const video = document.getElementById('webcam');
@@ -39,15 +39,14 @@
     
     let model, logs = [], isFastMovement = false, lastProcessedTime = 0;
 
-    // Distance Formula: $Distance = \frac{RealHeight \times FocalLength}{PixelHeight}$
-    const refHeights = { "person": 1.7, "car": 1.5, "dog": 0.5, "truck": 2.5, "bus": 3.0, "bicycle": 1.0, "default": 1.2 };
+    const refHeights = { "person": 1.7, "car": 1.5, "dog": 0.5, "truck": 2.5, "bicycle": 1.0, "default": 1.2 };
 
     async function init() {
         model = await cocoSsd.load();
-        updateLog("System: AI Model Loaded.");
+        updateLog("System: Ready to scan.");
         
-        window.addEventListener('devicemotion', (event) => {
-            const acc = event.acceleration;
+        window.addEventListener('devicemotion', (e) => {
+            const acc = e.acceleration;
             if (acc && (Math.abs(acc.x) > 12 || Math.abs(acc.y) > 12)) {
                 isFastMovement = true;
                 fastLabel.style.display = 'inline';
@@ -66,33 +65,49 @@
             canvas.height = video.videoHeight;
             predict();
         };
-        speak("System activated. Analyzing surroundings.");
+        speak("Analyzing path.");
     };
 
     async function predict() {
         const now = Date.now();
-        const interval = isFastMovement ? 2000 : 600; 
+        const interval = isFastMovement ? 2000 : 700; 
 
         if (now - lastProcessedTime > interval) {
             const predictions = await model.detect(video);
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             
+            // Draw a "Clearance Zone" box for visual reference
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.2)";
+            ctx.strokeRect(canvas.width*0.25, canvas.height*0.4, canvas.width*0.5, canvas.height*0.5);
+
+            let obstacleInPath = false;
+
             predictions.forEach(p => {
                 const distM = (refHeights[p.class] || refHeights.default) * 600 / p.bbox[3];
                 const feet = (distM * 3.28).toFixed(1);
                 
-                // Visual Feedback
+                // Draw detection
                 ctx.strokeStyle = "#00FF00";
                 ctx.lineWidth = 3;
                 ctx.strokeRect(...p.bbox);
 
-                // Specific Check for 3ft and 10ft
+                // Check if object is in the "Walking Path" (Middle 50% of screen)
+                if (p.bbox[0] < canvas.width * 0.75 && (p.bbox[0] + p.bbox[2]) > canvas.width * 0.25) {
+                    obstacleInPath = true;
+                }
+
                 if (Math.abs(feet - 3) < 1.8 || Math.abs(feet - 10) < 1.8) {
-                    const msg = `${p.class} identified at ${feet} feet`;
-                    updateLog(msg);
-                    speak(msg);
+                    updateLog(`${p.class} @ ${feet}ft`);
+                    speak(`${p.class} at ${feet} feet`);
                 }
             });
+
+            // "Space/Road" Logic
+            if (!obstacleInPath && predictions.length < 3) {
+                updateLog("Clear space detected");
+                speak("Road is clear");
+            }
+
             lastProcessedTime = now;
         }
         requestAnimationFrame(predict);
@@ -107,8 +122,10 @@
     }
 
     function speak(text) {
-        const utterance = new SpeechSynthesisUtterance(text);
-        window.speechSynthesis.speak(utterance);
+        if (!window.speechSynthesis.speaking) {
+            const utterance = new SpeechSynthesisUtterance(text);
+            window.speechSynthesis.speak(utterance);
+        }
     }
 
     document.getElementById('nightBtn').onclick = () => document.body.classList.toggle('night-mode');
